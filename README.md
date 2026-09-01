@@ -2,30 +2,14 @@
 
 Bluetoothヘッドセットの物理ボタンで、macOS上の [Claude Desktop](https://claude.ai/download) の音声入力を開始・停止・送信できるメニューバー常駐アプリです。
 
-キーボードやマウスに触れずに、ヘッドセットのボタンだけで「話して送る」を完結できます。
-
-## 何が起きるか
-
-```
-ヘッドセットのボタンを押す
-  ↓ (Bluetooth AVRCP)
-macOS のメディアコマンド
-  ↓
-本アプリが捕捉 (Now Playing クレーム)
-  ↓
-Claude Desktop が最前面のとき:
-  ボタン → 現在の会話で音声入力を開始
-  (以降の操作はマイクの選択によって変わります。下の表をご覧ください)
-Claude Desktop が最前面でないとき:
-  何もせず素通しします (YouTube 等が従来どおり反応します)
-```
+キーボードやマウスに触れずに、ヘッドセットのボタンだけで「話して送る」を完結できます。動作するのは Claude Desktop が最前面のときだけで、それ以外のときは何もしません。
 
 ## 動作要件
 
 - macOS 13 (Ventura) 以降 / Apple Silicon
 - Claude Desktop (デスクトップアプリ)
-- Command Line Tools (`xcode-select --install` で入ります。Xcode本体は不要です)
-- アクセシビリティ権限 (イベント捕捉と Claude Desktop のボタン操作に必要です)
+- Command Line Tools (`xcode-select --install` で入ります)
+- アクセシビリティ権限
 
 ## インストール
 
