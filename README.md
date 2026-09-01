@@ -20,8 +20,6 @@ Claude Desktop が最前面でないとき:
   何もせず素通しします (YouTube 等が従来どおり反応します)
 ```
 
-- Karabiner-Elements や Hammerspoon は使いません
-
 ## 動作要件
 
 - macOS 13 (Ventura) 以降 / Apple Silicon
