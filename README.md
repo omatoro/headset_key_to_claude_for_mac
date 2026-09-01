@@ -20,7 +20,6 @@ Claude Desktop が最前面でないとき:
   何もせず素通しします (YouTube 等が従来どおり反応します)
 ```
 
-- キーボードの入力処理には一切介入しません。修飾キー設定(Caps Lock→Control 等)はそのまま動きます
 - Karabiner-Elements や Hammerspoon は使いません
 
 ## 動作要件
