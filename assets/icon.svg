@@ -1,0 +1,35 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- headset_key_to_claude_for_mac アプリアイコン
+       モチーフ: ヘッドセット + 声/AIを想起させる放射スパーク
+       (実在ロゴの複製ではないオリジナルの抽象形) -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#D97757"/>
+      <stop offset="1" stop-color="#B44F2B"/>
+    </linearGradient>
+  </defs>
+
+  <!-- macOS風の角丸背景 -->
+  <rect x="32" y="32" width="960" height="960" rx="228" fill="url(#bg)"/>
+
+  <!-- ヘッドバンド -->
+  <path d="M 262 640 L 262 500 A 250 250 0 0 1 762 500 L 762 640"
+        stroke="#F7F2EA" stroke-width="60" fill="none" stroke-linecap="round"/>
+
+  <!-- 左右のイヤーカップ -->
+  <rect x="204" y="612" width="112" height="184" rx="54" fill="#F7F2EA"/>
+  <rect x="708" y="612" width="112" height="184" rx="54" fill="#F7F2EA"/>
+
+  <!-- 中央のスパーク(声・AIの発火) -->
+  <g stroke="#F7F2EA" stroke-width="36" stroke-linecap="round">
+    <line x1="512" y1="452" x2="512" y2="560"/>
+    <line x1="512" y1="704" x2="512" y2="812"/>
+    <line x1="332" y1="632" x2="440" y2="632"/>
+    <line x1="584" y1="632" x2="692" y2="632"/>
+    <line x1="391" y1="511" x2="465" y2="585"/>
+    <line x1="559" y1="679" x2="633" y2="753"/>
+    <line x1="633" y1="511" x2="559" y2="585"/>
+    <line x1="465" y1="679" x2="391" y2="753"/>
+  </g>
+  <circle cx="512" cy="632" r="34" fill="#F7F2EA"/>
+</svg>

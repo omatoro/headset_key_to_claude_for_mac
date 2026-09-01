@@ -1,0 +1,232 @@
+import Cocoa
+import CoreGraphics
+
+// Media key codes from IOKit/hidsystem/ev_keymap.h
+enum MediaKey: Int32 {
+    case play = 16        // NX_KEYTYPE_PLAY
+    case next = 17        // NX_KEYTYPE_NEXT
+    case previous = 18    // NX_KEYTYPE_PREVIOUS
+    case fast = 19        // NX_KEYTYPE_FAST
+    case rewind = 20      // NX_KEYTYPE_REWIND
+}
+
+protocol MediaKeyTapDelegate: AnyObject {
+    func mediaKeyTap(_ tap: MediaKeyTap, receivedKey key: MediaKey)
+}
+
+class MediaKeyTap {
+    weak var delegate: MediaKeyTapDelegate?
+
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+
+    /// Which tap point we actually got ("HID" or "session"). Surfaced in
+    /// Copy Debug Info, since the two behave differently with respect to rcd.
+    private(set) var activeTapLocation: String?
+
+    // Diagnostics: a key-up with no preceding key-down for the same key means
+    // something upstream (rcd/mediaremoted, or a disabled tap) swallowed the
+    // key-down. On the machine where the double-toggle reproduces this
+    // coincided with the bug; on other machines it occurs harmlessly, so it's
+    // logged as an observation to correlate against, not a diagnosis.
+    private var sawKeyDown: [Int32: Date] = [:]
+    private static let keyDownPairingWindow: TimeInterval = 2.0
+
+    init() {}
+
+    deinit {
+        stop()
+    }
+
+    // MARK: - Accessibility Permission
+
+    static func checkAccessibilityPermission() -> Bool {
+        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+        return AXIsProcessTrustedWithOptions(options)
+    }
+
+    static func isAccessibilityEnabled() -> Bool {
+        return AXIsProcessTrusted()
+    }
+
+    // MARK: - Event Tap Management
+
+    func start() -> Bool {
+        let trusted = Self.isAccessibilityEnabled()
+        NSLog("MediaKeyTap: Accessibility trusted = \(trusted)")
+
+        guard trusted else {
+            NSLog("MediaKeyTap: Accessibility permission not granted")
+            return false
+        }
+
+        // Create event tap for system-defined events (which include media keys)
+        // NX_SYSDEFINED = 14, this is where media keys come through
+        let eventMask: CGEventMask = CGEventMask(1 << 14)  // Only NX_SYSDEFINED events
+        NSLog("MediaKeyTap: Creating event tap with mask: \(eventMask)")
+
+        // Use a static callback that will call our instance method
+        let callback: CGEventTapCallBack = { proxy, type, event, refcon in
+            guard let refcon = refcon else { return Unmanaged.passUnretained(event) }
+            let tap = Unmanaged<MediaKeyTap>.fromOpaque(refcon).takeUnretainedValue()
+            return tap.handleEvent(proxy: proxy, type: type, event: event)
+        }
+
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+
+        // Tap at the HID level rather than the session level.
+        //
+        // `rcd`/`mediaremoted` consumes the media-key *key-down* before a
+        // session-level tap sees it whenever it considers another app to be
+        // the Now Playing target — and it delivers that key-down natively to
+        // that app, which is the second toggle in the double-toggle bug. An
+        // app actually producing audio outranks our metadata-only Now Playing
+        // claim no matter how often we refresh it, so we cannot reliably win
+        // that arbitration; instead we intercept ahead of it. `cghidEventTap`
+        // is the earliest CGEvent tap point, before the session-level
+        // dispatch rcd participates in.
+        //
+        // Fall back to the session tap if the HID tap can't be created, so a
+        // permissions edge case degrades to the old behavior instead of
+        // leaving the app with no tap at all.
+        for location in [CGEventTapLocation.cghidEventTap, .cgSessionEventTap] {
+            eventTap = CGEvent.tapCreate(
+                tap: location,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: CGEventMask(eventMask),
+                callback: callback,
+                userInfo: refcon
+            )
+            if eventTap != nil {
+                activeTapLocation = (location == .cghidEventTap) ? "HID" : "session"
+                break
+            }
+            NSLog("MediaKeyTap: tapCreate failed at \(location == .cghidEventTap ? "HID" : "session") level")
+        }
+
+        guard let eventTap = eventTap else {
+            NSLog("MediaKeyTap: Failed to create event tap. CGEvent.tapCreate returned nil.")
+            NSLog("MediaKeyTap: This usually means accessibility permission is not granted or the app needs to be re-authorized.")
+            return false
+        }
+        debugLog("CGEventTap created at \(activeTapLocation ?? "unknown") level")
+
+        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
+
+        guard let runLoopSource = runLoopSource else {
+            print("Failed to create run loop source")
+            return false
+        }
+
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+
+        NSLog("MediaKeyTap: Event tap enabled and added to run loop")
+        return true
+    }
+
+    func stop() {
+        if let eventTap = eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+
+        if let runLoopSource = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        }
+
+        eventTap = nil
+        runLoopSource = nil
+    }
+
+    // MARK: - Event Handling
+
+    private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        // Handle tap disabled events (re-enable if needed).
+        //
+        // `tapDisabledByTimeout` means the window server decided our callback
+        // was too slow — while disabled we silently miss key-downs, which is
+        // one way the double-toggle bug reappears. Log it: this failure was
+        // previously invisible.
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            let reason = (type == .tapDisabledByTimeout) ? "timeout" : "user input"
+            debugLog("CGEventTap DISABLED by \(reason) — re-enabling")
+            if let eventTap = eventTap {
+                CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Convert to NSEvent to check for media keys
+        guard let nsEvent = NSEvent(cgEvent: event) else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Media keys come as system-defined events with subtype 8
+        guard nsEvent.type == .systemDefined,
+              nsEvent.subtype.rawValue == 8 else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Extract key code and key state from data1
+        let data1 = nsEvent.data1
+        let keyCode = Int32((data1 & 0xFFFF0000) >> 16)
+        let keyFlags = data1 & 0x0000FFFF
+        let keyState = (keyFlags & 0xFF00) >> 8
+        let keyRepeat = keyFlags & 0x1
+
+        // Check if it's a media key we care about
+        guard MediaKey(rawValue: keyCode) != nil else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        // 改造版: キーボードのメディアキーはconsumeせず素通しする(上流実装は
+        // key-down/upを両方consumeして選択アプリへ転送していた)。本アプリの用途は
+        // ヘッドセット(NowPlaying経路)だけであり、キーボードのメディアキーは素の
+        // macOS挙動のまま触らない。delegate通知は「物理キー押下の直近証跡」
+        // (NowPlaying側ゲートの判定材料)として残す。
+
+        if keyState == 0xA {
+            // Key down event
+            if keyRepeat == 0 {
+                if let mediaKey = MediaKey(rawValue: keyCode) {
+                    debugLog("CGEventTap key-down keyCode=\(keyCode) key=\(mediaKey) (pass-through)")
+                    sawKeyDown[keyCode] = Date()
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.delegate?.mediaKeyTap(self, receivedKey: mediaKey)
+                    }
+                }
+            }
+            return Unmanaged.passUnretained(event)
+        } else if keyState == 0xB {
+            // Key up event - also notify delegate as fallback
+            // (on macOS 26+, key-down may be consumed by rcd before reaching us)
+            if let mediaKey = MediaKey(rawValue: keyCode) {
+                let pairedDown = sawKeyDown[keyCode].map {
+                    Date().timeIntervalSince($0) <= Self.keyDownPairingWindow
+                } ?? false
+                sawKeyDown[keyCode] = nil
+
+                if pairedDown {
+                    debugLog("CGEventTap key-up keyCode=\(keyCode) key=\(mediaKey)")
+                } else {
+                    // Something upstream (rcd/mediaremoted) consumed the
+                    // key-down before our tap saw it. Whether that upstream
+                    // handler also actioned the key on another app varies by
+                    // machine, so this is recorded as a fact, not a verdict.
+                    debugLog("CGEventTap key-up keyCode=\(keyCode) key=\(mediaKey) — no preceding key-down (consumed upstream)")
+                }
+
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.delegate?.mediaKeyTap(self, receivedKey: mediaKey)
+                }
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Pass through other events
+        return Unmanaged.passUnretained(event)
+    }
+}
