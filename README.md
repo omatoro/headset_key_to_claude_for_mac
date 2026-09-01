@@ -8,7 +8,7 @@ Bluetoothヘッドセットの物理ボタンで、macOS上の [Claude Desktop](
 
 - macOS 13 (Ventura) 以降 / Apple Silicon
 - Claude Desktop (デスクトップアプリ)
-- Command Line Tools (`xcode-select --install` で入ります)
+- Command Line Tools — ターミナルで `xcode-select --install` を実行するとインストールできます ([Apple公式の説明](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools))
 - アクセシビリティ権限
 
 ## インストール
